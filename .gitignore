@@ -1,0 +1,9 @@
+*.orig
+*.dll
+*.exe
+*.userprefs
+CKAN-Metacheck/bin/*
+CKAN-Metacheck/obj/*
+packages/
+*.suo
+*.csproj.user
