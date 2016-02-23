@@ -9,22 +9,22 @@ namespace CKANMetacheck
 {
     public static class MetadataCheckUtils
     {
-        public static void CheckMod(string modName, ModInfo modInfo, MetadataCache metadataCache)
+        public static int CheckMod(string modName, string singleModVersion, ModInfo modInfo, MetadataCache metadataCache)
         {
             CacheInfo ci = new CacheInfo();
             ci.version = modInfo.version;
             ci.state = "fail-install";
             CleanKSP();
-            if (!InstallMod(modName))
+            if (!InstallMod(modName, singleModVersion))
             {
                 metadataCache.AddCacheData(modName, ci);
-                return;
+                return -1;
             }
             if (!FilesOK(modName, modInfo))
             {
                 ci.state = "fail-files";
                 metadataCache.AddCacheData(modName, ci);
-                return;
+                return -2;
             }
             ci.state = "ok";
             metadataCache.AddCacheData(modName, ci);
@@ -32,6 +32,7 @@ namespace CKANMetacheck
             {
                 File.Delete("errors/" + modName + ".txt");
             }
+            return 0;
         }
 
         public static void CleanKSP()
@@ -41,20 +42,29 @@ namespace CKANMetacheck
             process.StartInfo.FileName = "/bin/sh";
             process.StartInfo.Arguments = "run.sh clean";
             process.StartInfo.UseShellExecute = false;
+            /*
             process.StartInfo.RedirectStandardError = true;
             process.StartInfo.RedirectStandardInput = true;
             process.StartInfo.RedirectStandardOutput = true;
+            */
             process.Start();
             process.WaitForExit();
             Console.WriteLine("Clean done!");
         }
 
-        public static bool InstallMod(string modName)
+        public static bool InstallMod(string modName, string singleModVersion)
         {
             Console.WriteLine("Running install!");
             Process process = new Process();
             process.StartInfo.FileName = "mono";
-            process.StartInfo.Arguments = "ckan.exe install " + modName + " --headless";
+            if (singleModVersion == null)
+            {
+                process.StartInfo.Arguments = "ckan.exe install " + modName + " --headless";
+            }
+            else
+            {
+                process.StartInfo.Arguments = "ckan.exe install " + modName + "=" + singleModVersion + " --headless";
+            }
             process.StartInfo.UseShellExecute = false; 
             /*
             process.StartInfo.RedirectStandardError = true;
@@ -77,12 +87,21 @@ namespace CKANMetacheck
         public static bool FilesOK(string modName, ModInfo modInfo)
         {
             Console.WriteLine("Checking files!");
-            string fileName = CkanUtils.GetCacheName(modName, modInfo);
-            string fullName = "downloads/" + fileName; 
+            //string fileName = CkanUtils.GetCacheName(modName, modInfo);
+            string fullName = null; 
             string extractDirectoryName = "temp/extract/";
-            if (!File.Exists(fullName))
+            string[] dirFiles = Directory.GetFiles("downloads");
+            string fileHash =  CkanUtils.GetModHash(modName, modInfo);
+            foreach (string fileName in dirFiles)
             {
-                Console.WriteLine("Checking files FAILED!");
+                if (Path.GetFileName(fileName).StartsWith(fileHash))
+                {
+                    fullName = fileName;
+                }                    
+            }
+            if (fullName == null)
+            {
+                Console.WriteLine("Checking files FAILED, No zip file!");
                 return false;
             }
             if (Directory.Exists(extractDirectoryName))

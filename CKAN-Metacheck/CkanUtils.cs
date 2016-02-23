@@ -32,7 +32,53 @@ namespace CKANMetacheck
             foreach (JProperty mod in registry["available_modules"])
             {
                 string currentModName = mod.Name;
-                JProperty versionProperty = (JProperty)mod.Value["module_version"].First;
+                bool versionOk = false;
+
+                foreach (JProperty versionProperty in mod.Value["module_version"])
+                {
+                    JObject versionKeys = (JObject)versionProperty.Value;
+                    ModInfo mi = new ModInfo();
+                    mi.version = (string)versionKeys["version"];
+                    mi.downloadUrl = (string)versionKeys["download"];
+                    JToken installs = versionKeys["install"];
+                    if (installs.Type != JTokenType.Null)
+                    {
+                        foreach (JObject jobj in (JArray)installs)
+                        {
+                            string file = (string)jobj["file"];
+                            string installs_to = (string)jobj["install_to"];
+                            mi.installs.Add(new KeyValuePair<string,string>(file, installs_to));
+                        }
+                    }
+                    string ksp_version = (string)versionKeys["ksp_version"];
+                    string ksp_version_min = (string)versionKeys["ksp_version"];
+                    string ksp_version_max = (string)versionKeys["ksp_version"];
+                    versionOk = (ksp_version == KSP_VERSION) || VersionCompatible(KSP_VERSION, ksp_version_min, ksp_version_max);
+                    if (versionOk)
+                    {
+                        modInfo.Add(currentModName, mi);
+                        break;
+                    }
+                }
+                if (versionOk)
+                {
+                    continue;
+                }
+            }
+            return modInfo;
+        }
+
+        public static Dictionary<string, ModInfo> GetSingleModInfo(string KSP_VERSION, JToken registry, string modName, string modVersion)
+        {
+            Dictionary<string, ModInfo> modInfo = new Dictionary<string, ModInfo>();
+            JObject mod = (JObject)registry["available_modules"][modName];
+            if (mod == null)
+            {
+                return modInfo;
+            }
+            bool versionOk = false;
+            foreach (JProperty versionProperty in mod["module_version"])
+            {
                 JObject versionKeys = (JObject)versionProperty.Value;
                 ModInfo mi = new ModInfo();
                 mi.version = (string)versionKeys["version"];
@@ -50,10 +96,11 @@ namespace CKANMetacheck
                 string ksp_version = (string)versionKeys["ksp_version"];
                 string ksp_version_min = (string)versionKeys["ksp_version"];
                 string ksp_version_max = (string)versionKeys["ksp_version"];
-                bool versionOk = (ksp_version == KSP_VERSION) || VersionCompatible(KSP_VERSION, ksp_version_min, ksp_version_max);
-                if (versionOk)
+                versionOk = (ksp_version == KSP_VERSION) || VersionCompatible(KSP_VERSION, ksp_version_min, ksp_version_max);
+                if (versionOk && (modVersion == null || mi.version == modVersion))
                 {
-                    modInfo.Add(currentModName, mi);
+                    modInfo.Add(modName, mi);
+                    return modInfo;
                 }
             }
             return modInfo;
@@ -67,6 +114,8 @@ namespace CKANMetacheck
                 string trimmed = dirs[0].Substring("temp/extract/".Length);
                 return trimmed;
             }
+
+            /*
 
             foreach (KeyValuePair<string,string> kvp in modInfo.installs)
             {
@@ -107,6 +156,8 @@ namespace CKANMetacheck
                 }
             }
             return null;
+            */
+            return "";
         }
 
         public static bool VersionCompatible(string version, string min, string max)
@@ -149,6 +200,17 @@ namespace CKANMetacheck
             return true;
         }
 
+        public static string GetModHash(string modName, ModInfo modInfo)
+        {
+            string url = Uri.UnescapeDataString(modInfo.downloadUrl);
+            using (var sha1 = new SHA1Managed())
+            {
+                byte[] hash = sha1.ComputeHash(Encoding.UTF8.GetBytes(url));
+                return BitConverter.ToString(hash).Replace("-", "").Substring(0, 8);
+            }
+        }
+
+        /*
         public static string GetCacheName(string modName, ModInfo modInfo)
         {
             string url = Uri.UnescapeDataString(modInfo.downloadUrl);
@@ -161,16 +223,27 @@ namespace CKANMetacheck
             string version = Regex.Replace(modInfo.version, "[^A-Za-z0-9_.-]", "-");
             return hashString + "-" + modName + "-" + version + ".zip";
         }
+        */
 
-        public static bool UsesKerbalStuff(string modName, JToken registry)
+        public static bool UsesKerbalStuff(string modName, string modVersion, JToken registry, bool printKerbalstuffErrors)
         {
             if (registry["available_modules"][modName] == null)
             {
                 return false;
             }
             JObject mod = (JObject)registry["available_modules"][modName].First.First.First.First;
+            if (modVersion != null)
+            {
+                JObject exactVersion = (JObject)((JObject)registry["available_modules"][modName]["module_version"]).GetValue(modVersion);
+                if (exactVersion != null)
+                {
+                    Console.WriteLine("Found version " + modVersion + " for " + modName);
+                    mod = exactVersion;
+                }
+            }
             if (((string)mod["download"]).Contains("kerbalstuff.com"))
             {
+                Console.WriteLine(modName + " uses kerbalstuff!");
                 return true;
             }
             if (mod["depends"].Type != JTokenType.Null)
@@ -178,7 +251,7 @@ namespace CKANMetacheck
                 JArray deps = (JArray)mod["depends"];
                 foreach (JObject depObject in deps)
                 {
-                    if (UsesKerbalStuff((string)depObject["name"], registry))
+                    if (UsesKerbalStuff((string)depObject["name"], null, registry, printKerbalstuffErrors))
                     {
                         return true;
                     }

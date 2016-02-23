@@ -8,15 +8,28 @@ namespace CKANMetacheck
 {
     public class MainClass
     {
-        public static void Main(string[] arguments)
+        //Return conditions:
+        //0 - OK
+        //1 - Failed install
+        //2 - Failed files
+        //3 - Uses kerbalstuff
+        //4 - Failed to check single mod
+
+        //Arguments program.exe ksp_version (single_mod_to_test)
+        public static int Main(string[] arguments)
         {
             string KSP_VERSION = arguments[0];
             bool singleModMode = false;
             string singleModName = null;
+            string singleModVersion = null;
             if (arguments.Length >= 2)
             {
                 singleModMode = true;
                 singleModName = arguments[1];
+            }
+            if (arguments.Length >= 3)
+            {
+                singleModVersion = arguments[2];
             }
             if (!Directory.Exists("errors"))
             {
@@ -24,55 +37,90 @@ namespace CKANMetacheck
             }
             JToken registry = CkanUtils.GetRegistry();
             MetadataCache metadataCache = new MetadataCache("cache.json");
-            Dictionary<string, CacheInfo> cacheInfo = metadataCache.GetCacheData();
-            Dictionary<string, ModInfo> modInfo = CkanUtils.GetModInfo(KSP_VERSION, registry);
-            int skipCount = 0;
-            foreach (KeyValuePair<string,ModInfo> kvp in modInfo)
+            Dictionary<string, CacheInfo> cacheInfo = null;
+            Dictionary<string, ModInfo> modInfo = null;
+            if (singleModMode)
             {
-                string modName = kvp.Key;
-                if (singleModMode && singleModName != modName)
+                modInfo = CkanUtils.GetSingleModInfo(KSP_VERSION, registry, singleModName, singleModVersion);
+            }
+            else
+            {
+                cacheInfo = metadataCache.GetCacheData();
+                modInfo = CkanUtils.GetModInfo(KSP_VERSION, registry);
+            }
+             
+            int skipCount = 0;
+            if (!singleModMode)
+            {
+                foreach (KeyValuePair<string,ModInfo> kvp in modInfo)
                 {
-                    continue;
-                }
-                bool usesKS = CkanUtils.UsesKerbalStuff(modName, registry);
-                if (usesKS)
-                {
-                    Console.WriteLine("Skipping " + modName + " as it uses kerbalstuff");
-                    continue;
-                }
-                bool checkMod = false;
-                if (!cacheInfo.ContainsKey(kvp.Key))
-                {
-                    Console.WriteLine("Processing new mod: " + modName);
-                    checkMod = true;
-                }
-                else
-                {
-                    if (kvp.Value.version != cacheInfo[modName].version)
+                    string modName = kvp.Key;
+                    bool usesKS = CkanUtils.UsesKerbalStuff(modName, null, registry, false);
+                    if (usesKS)
                     {
-                        Console.WriteLine("Processing updated mod: " + modName);
+                        Console.WriteLine("Skipping " + modName + " as it uses kerbalstuff");
+                        continue;
+                    }
+                    //Always check if we are in single mod mode.
+                    bool checkMod = singleModMode;
+                    if (!cacheInfo.ContainsKey(kvp.Key))
+                    {
+                        Console.WriteLine("Processing new mod: " + modName);
                         checkMod = true;
                     }
                     else
                     {
-                        //if (cacheInfo[modName].state != "ok")
-                        if (cacheInfo[modName].state == "fail-files")
+                        if (kvp.Value.version != cacheInfo[modName].version)
                         {
-                            Console.WriteLine("Processing failed mod: " + modName);
+                            Console.WriteLine("Processing updated mod: " + modName);
                             checkMod = true;
                         }
+                        else
+                        {
+                            //if (cacheInfo[modName].state == "fail-files")
+                            if (cacheInfo[modName].state != "ok")
+                            {
+                                Console.WriteLine("Processing failed mod: " + modName);
+                                checkMod = true;
+                            }
+                        }
                     }
-                }
-                if (checkMod)
+                    if (checkMod)
+                    {
+                        MetadataCheckUtils.CheckMod(modName, null, kvp.Value, metadataCache);
+                    }
+                    else
+                    {
+                        skipCount++;
+                    }
+                } 
+            }
+            else
+            {
+                if (modInfo.ContainsKey(singleModName))
                 {
-                    MetadataCheckUtils.CheckMod(modName, kvp.Value, metadataCache);
+                    bool usesKS = CkanUtils.UsesKerbalStuff(singleModName, singleModVersion, registry, true);
+                    if (!usesKS)
+                    {
+                        return MetadataCheckUtils.CheckMod(singleModName, singleModVersion, modInfo[singleModName], metadataCache);
+                    }
+                    else
+                    {
+                        Console.WriteLine("Mod uses kerbalstuff!");
+                        return -3;
+                    }
                 }
                 else
                 {
-                    skipCount++;
+                    Console.WriteLine("Failed to find " + singleModName);
+                    return -4;
                 }
-           }
-            Console.WriteLine("Skipped processing of " + skipCount + " mods in cache");
+            }
+            if (!singleModMode)
+            {
+                Console.WriteLine("Skipped processing of " + skipCount + " mods in cache");
+            }
+            return 0;
         }
     }
 }
