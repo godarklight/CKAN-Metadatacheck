@@ -108,55 +108,14 @@ namespace CKANMetacheck
 
         public static string GetGameDataDir(string modName, ModInfo modInfo)
         {
-            string[] dirs = Directory.GetDirectories("temp/extract", "GameData", SearchOption.AllDirectories);
-            if (dirs.Length == 1 && dirs[0].EndsWith("GameData"))
+            string[] dirs = Directory.GetDirectories("temp/extract", "*", SearchOption.AllDirectories);
+            foreach (string dirName in dirs)
             {
-                string trimmed = dirs[0].Substring("temp/extract/".Length);
-                return trimmed;
-            }
-
-            /*
-
-            foreach (KeyValuePair<string,string> kvp in modInfo.installs)
-            {
-                string file = kvp.Key;
-                string installs_to = kvp.Value;
-                //Console.WriteLine(file + " :  " + installs_to);
-                if (installs_to.StartsWith("GameData"))
+                if (Path.GetFileName(dirName).ToLower() == "gamedata")
                 {
-                    int countUp = 1;
-                    foreach (char c in installs_to)
-                    {
-                        if (c == '/')
-                        {
-                            countUp++;
-                        }
-                    }
-                    if (String.IsNullOrEmpty(file))
-                    {
-                        if (countUp == 1)
-                        {
-                            return "";
-                        }
-                        else
-                        {
-                            return null;
-                        }
-                    }
-                    string gameDataDir = file;
-                    for (int i = 0; i < countUp; i++)
-                    {
-                        if (gameDataDir == null || !gameDataDir.Contains("/"))
-                        {
-                            return null;
-                        }
-                        gameDataDir = gameDataDir.Substring(0, gameDataDir.LastIndexOf('/'));
-                    }
-                    return gameDataDir;
+                    return dirName.Substring("temp/extract/".Length);
                 }
             }
-            return null;
-            */
             return "";
         }
 
@@ -203,30 +162,24 @@ namespace CKANMetacheck
         public static string GetModHash(string modName, ModInfo modInfo)
         {
             string url = Uri.UnescapeDataString(modInfo.downloadUrl);
+            //Differences?
+            url = url.Replace("&", "%26");
             using (var sha1 = new SHA1Managed())
             {
                 byte[] hash = sha1.ComputeHash(Encoding.UTF8.GetBytes(url));
-                return BitConverter.ToString(hash).Replace("-", "").Substring(0, 8);
+                string retVal = BitConverter.ToString(hash).Replace("-", "").Substring(0, 8);
+                return retVal;
             }
         }
 
-        /*
-        public static string GetCacheName(string modName, ModInfo modInfo)
+        public static bool UsesKerbalStuff(string modName, string modVersion, JToken registry, bool printKerbalstuffErrors, int depth)
         {
-            string url = Uri.UnescapeDataString(modInfo.downloadUrl);
-            string hashString = null;
-            using (var sha1 = new SHA1Managed())
+            if (depth == 0)
             {
-                byte[] hash = sha1.ComputeHash(Encoding.UTF8.GetBytes(url));
-                hashString = BitConverter.ToString(hash).Replace("-", "").Substring(0, 8);
+                Console.WriteLine("Max depth limit reached for " + modName);
+                //Defend against the infinite!
+                return false;
             }
-            string version = Regex.Replace(modInfo.version, "[^A-Za-z0-9_.-]", "-");
-            return hashString + "-" + modName + "-" + version + ".zip";
-        }
-        */
-
-        public static bool UsesKerbalStuff(string modName, string modVersion, JToken registry, bool printKerbalstuffErrors)
-        {
             if (registry["available_modules"][modName] == null)
             {
                 return false;
@@ -251,7 +204,7 @@ namespace CKANMetacheck
                 JArray deps = (JArray)mod["depends"];
                 foreach (JObject depObject in deps)
                 {
-                    if (UsesKerbalStuff((string)depObject["name"], null, registry, printKerbalstuffErrors))
+                    if (UsesKerbalStuff((string)depObject["name"], null, registry, printKerbalstuffErrors, depth - 1))
                     {
                         return true;
                     }

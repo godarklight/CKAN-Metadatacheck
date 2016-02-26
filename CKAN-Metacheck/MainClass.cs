@@ -8,6 +8,7 @@ namespace CKANMetacheck
 {
     public class MainClass
     {
+        private static Workarounds workarounds = new Workarounds();
         //Return conditions:
         //0 - OK
         //1 - Failed install
@@ -55,7 +56,13 @@ namespace CKANMetacheck
                 foreach (KeyValuePair<string,ModInfo> kvp in modInfo)
                 {
                     string modName = kvp.Key;
-                    bool usesKS = CkanUtils.UsesKerbalStuff(modName, null, registry, false);
+                    if (workarounds.skipMods.Contains(modName))
+                    {
+                        Console.WriteLine("Skipping " + modName + " as it is in the skip list");
+                        continue;
+                    }
+
+                    bool usesKS = CkanUtils.UsesKerbalStuff(modName, kvp.Value.version, registry, false, 32);
                     if (usesKS)
                     {
                         Console.WriteLine("Skipping " + modName + " as it uses kerbalstuff");
@@ -87,7 +94,12 @@ namespace CKANMetacheck
                     }
                     if (checkMod)
                     {
-                        MetadataCheckUtils.CheckMod(modName, null, kvp.Value, metadataCache);
+                        Console.WriteLine("Checking " + modName);
+                        if (MetadataCheckUtils.CheckMod(modName, null, kvp.Value, metadataCache) != 0)
+                        {
+                            //Debug point
+                            Console.WriteLine(modName + " failed!");
+                        }
                     }
                     else
                     {
@@ -99,7 +111,7 @@ namespace CKANMetacheck
             {
                 if (modInfo.ContainsKey(singleModName))
                 {
-                    bool usesKS = CkanUtils.UsesKerbalStuff(singleModName, singleModVersion, registry, true);
+                    bool usesKS = CkanUtils.UsesKerbalStuff(singleModName, singleModVersion, registry, true, 32);
                     if (!usesKS)
                     {
                         return MetadataCheckUtils.CheckMod(singleModName, singleModVersion, modInfo[singleModName], metadataCache);

@@ -9,6 +9,8 @@ namespace CKANMetacheck
 {
     public static class MetadataCheckUtils
     {
+        public static Workarounds workarounds = new Workarounds();
+
         public static int CheckMod(string modName, string singleModVersion, ModInfo modInfo, MetadataCache metadataCache)
         {
             CacheInfo ci = new CacheInfo();
@@ -86,17 +88,19 @@ namespace CKANMetacheck
 
         public static bool FilesOK(string modName, ModInfo modInfo)
         {
+            
             Console.WriteLine("Checking files!");
             //string fileName = CkanUtils.GetCacheName(modName, modInfo);
             string fullName = null; 
             string extractDirectoryName = "temp/extract/";
             string[] dirFiles = Directory.GetFiles("downloads");
-            string fileHash =  CkanUtils.GetModHash(modName, modInfo);
+            string fileHash = CkanUtils.GetModHash(modName, modInfo);
             foreach (string fileName in dirFiles)
             {
                 if (Path.GetFileName(fileName).StartsWith(fileHash))
                 {
                     fullName = fileName;
+                    break;
                 }                    
             }
             if (fullName == null)
@@ -110,49 +114,55 @@ namespace CKANMetacheck
             }
             Directory.CreateDirectory(extractDirectoryName);
             ZipFile.ExtractToDirectory(fullName, extractDirectoryName);
-            string gamedataDir = CkanUtils.GetGameDataDir(fullName, modInfo);
+            string gamedataDir = workarounds.customRootFolders.ContainsKey(modName) ? workarounds.customRootFolders[modName] : CkanUtils.GetGameDataDir(fullName, modInfo);
             if (gamedataDir == null)
             {
                 Console.WriteLine("GameData Directory was not found!");
                 return false;
             }
-            //Ignore files
-            HashSet<string> ignoreFiles = new HashSet<string>();
-            ignoreFiles.Add("LICENCE");
-            ignoreFiles.Add("LICENSE");
-            ignoreFiles.Add("Thumbs.db");
-            ignoreFiles.Add(".DS_Store");
-            ignoreFiles.Add("Source");
-            ignoreFiles.Add("PluginData");
-            ignoreFiles.Add("Ships");
-            HashSet<string> ignoreExtensions = new HashSet<string>();
-            ignoreExtensions.Add("md");
-            ignoreExtensions.Add("txt");
-            ignoreExtensions.Add("cs");
-            bool ok = CheckDirectory(modName, extractDirectoryName + gamedataDir, "KSP/KSP_linux_current/GameData", ignoreFiles, ignoreExtensions);
+
+            bool ok = CheckDirectory(modName, "temp/extract/" + gamedataDir, "/");
             Console.WriteLine("Checking done!");
             return ok;
         }
 
-        private static bool CheckDirectory(string modName, string zipSource, string ckanSource, HashSet<string> ignoreFiles, HashSet<string> ignoreExtensions)
+        private static bool CheckDirectory(string modName, string zipRoot, string zipSource)
         {
+            string ckanRoot = "KSP/KSP_linux_current/GameData";
             List<string> errorList = new List<string>();
             //Check files exist
-            string[] zipFiles = Directory.GetFiles(zipSource);
-            string[] zipFolders = Directory.GetDirectories(zipSource);
+            string[] zipFiles = Directory.GetFiles(zipRoot + zipSource);
+            string[] zipFolders = Directory.GetDirectories(zipRoot + zipSource);
+            string relCkanPath = zipSource;
+            if (workarounds.customFolderRedirects.ContainsKey(modName))
+            {
+                foreach (KeyValuePair<string,string> kvp in workarounds.customFolderRedirects[modName])
+                {
+                    if (zipSource.StartsWith(kvp.Key))
+                    {
+                        relCkanPath = kvp.Value + zipSource.Substring(kvp.Key.Length);
+                    }
+                }
+            }
+            string fullCkanPath = ckanRoot + relCkanPath;
             bool ok = true;
             foreach (string zipFile in zipFiles)
             {
-                string fileName = zipFile.Substring(zipFile.LastIndexOf("/") + 1);
-                if (!File.Exists(ckanSource + "/" + fileName))
+                string fileName = Path.GetFileName(zipFile);
+                string fullFilePath = fullCkanPath + fileName;
+                if (workarounds.customFileRedirects.ContainsKey(modName) && workarounds.customFileRedirects[modName].ContainsKey(fileName))
+                {
+                    fullFilePath = ckanRoot + "/" + workarounds.customFileRedirects[modName][fileName];
+                }
+                if (!File.Exists(fullFilePath))
                 {
                     if (fileName.ToLower().StartsWith("modulemanager"))
                     {
                         bool skip = false;
-                        foreach (string ckanFile in Directory.GetFiles(ckanSource))
+                        foreach (string ckanFile in Directory.GetFiles(fullCkanPath))
                         {
                             
-                            string ckanFileName = ckanFile.Substring(ckanFile.LastIndexOf("/") + 1);
+                            string ckanFileName = Path.GetFileName(ckanFile);
                             if (ckanFileName.ToLower().StartsWith("modulemanager"))
                             {
                                 skip = true;
@@ -165,34 +175,42 @@ namespace CKANMetacheck
                             continue;
                         }
                     }
-                    if (ignoreExtensions.Contains(fileName.Substring(fileName.LastIndexOf(".") + 1)))
+                    if (workarounds.globalIgnoreExtensions.Contains(Path.GetExtension(fileName)))
                     {
                         continue;
                     }
-                    if (ignoreFiles.Contains(fileName))
+                    if (workarounds.globalIgnoreFiles.Contains(fileName))
                     {
                         continue;
                     }
-                    errorList.Add("FILE: " + fileName + " IS MISSING!");
-                    Console.WriteLine("FILE: " + fileName + " IS MISSING!");
+                    if (workarounds.customIgnoreFiles.ContainsKey(modName) && workarounds.customIgnoreFiles[modName].Contains(fileName))
+                    {
+                        continue;
+                    }
+                    errorList.Add("FILE: " + zipSource + fileName + " IS MISSING!");
+                    Console.WriteLine("FILE: " + zipSource + fileName + " IS MISSING!");
                     ok = false;
                 }
             }
             foreach (string zipFolder in zipFolders)
             {
-                string folderName = zipFolder.Substring(zipFolder.LastIndexOf("/") + 1);
-                if (Directory.Exists(ckanSource + "/" + folderName))
+                string folderName = Path.GetFileName(zipFolder);
+                if (Directory.Exists(fullCkanPath + folderName))
                 {
-                    ok = CheckDirectory(modName, zipSource + "/" + folderName, ckanSource + "/" + folderName, ignoreFiles, ignoreExtensions) && ok;
+                    ok = CheckDirectory(modName, zipRoot, zipSource + folderName + "/") && ok;
                 }
                 else
                 {
-                    if (ignoreFiles.Contains(folderName))
+                    if (workarounds.globalIgnoreFiles.Contains(folderName))
                     {
                         continue;
                     }
-                    errorList.Add("FOLDER: " + folderName + " IS MISSING!");
-                    Console.WriteLine("FOLDER: " + folderName + " IS MISSING!");
+                    if (workarounds.customIgnoreFiles.ContainsKey(modName) && workarounds.customIgnoreFiles[modName].Contains(folderName))
+                    {
+                        continue;
+                    }
+                    errorList.Add("FOLDER: " + zipSource + folderName + " IS MISSING!");
+                    Console.WriteLine("FOLDER: " + zipSource + folderName + " IS MISSING!");
                     ok = false;
                 }
             }
@@ -211,10 +229,6 @@ namespace CKANMetacheck
                 }
                 File.WriteAllText(errorName, sb.ToString());
             }
-            /*
-            Directory.GetDirectories(source);
-            Console.WriteLine("Checking ")
-            */
             return ok;
         }
     }
